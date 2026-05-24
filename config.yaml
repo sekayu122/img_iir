@@ -1,9 +1,9 @@
 # run_experiment.py default settings.
 # Run with: python run_experiment.py
-input: data/validation_synthetic/test
-run_dir: output/config_experiment
-gt: data/validation_synthetic/gt
-eval_before: data/validation_synthetic/src
+input: data/test/src
+run_dir: output/experiment_ai
+gt: data/test/gt
+eval_before: data/test/src
 overwrite: true
 
 filter:
@@ -12,8 +12,9 @@ filter:
 # evaluate_img_quarity.py に渡す評価設定。
 evaluation:
   # ノイズ低減スコアの100点に相当する低減量[dB]。
+  # 暗部ノイズ低減の改善を拾いやすくするため、標準の12dBより少し低めにします。
   # 小さくすると少しのノイズ低減でも高得点になり、大きくするとより強い低減が必要になります。
-  target_noise_db: 12.0
+  target_noise_db: 8.0
 
   # ブラー評価の0点に相当する after/GT エッジ強度比。
   # 例: 0.6なら、GTの60%までエッジが弱くなるとblur_scoreが0点になります。
@@ -50,12 +51,24 @@ evaluation:
   min_pixels: 100
 
   # total_scoreの重み設定。
-  # 未指定の項目はデフォルト重み1.0です。
-  # 例:
-  #   dark_noise: 3.0   # 暗部ノイズ低減を重視
-  #   dark_motion: 2.0  # 暗部の残像抑制も重視
-  #   high_psnr: 0.0    # 高輝度PSNRをtotal_scoreから除外
-  weights: {}
+  # 暗部ノイズ低減を主目的にしつつ、暗部の残像・構造崩れも抑える設定です。
+  # normal/highは完全に無視せず、過度な副作用を検出できる程度の重みにします。
+  weights:
+    dark_noise: 4.0
+    dark_motion: 2.0
+    dark_ssim: 2.0
+    dark_blur: 1.5
+    dark_psnr: 1.5
+    normal_noise: 0.75
+    normal_blur: 0.75
+    normal_motion: 0.75
+    normal_psnr: 0.75
+    normal_ssim: 0.75
+    high_noise: 0.5
+    high_blur: 0.5
+    high_motion: 0.5
+    high_psnr: 0.5
+    high_ssim: 0.5
 
   # 暗部ノイズ評価に使う静止ROI。
   # 空の場合は輝度から自動でdark領域を選びます。
