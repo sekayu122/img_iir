@@ -1,13 +1,9 @@
 # run_experiment.py default settings.
-# Run with: python run_experiment.py
+# Run with: python run_experiment.py FILTER_NAME EXPERIMENT_NAME
 input: data/test/src
-run_dir: output/experiment_ai
 gt: data/test/gt
 eval_before: data/test/src
 overwrite: true
-
-filter:
-  name: AIExpFilter
 
 # evaluate_img_quarity.py に渡す評価設定。
 evaluation:
@@ -80,10 +76,10 @@ evaluation:
 
 # best更新前に確認するvalidation設定。
 # dev_loop.pyはtrain評価後に以下をすべて実行し、すべてmin_total_score以上の場合だけbestを更新します。
+# validationの出力先は、必須引数のEXPERIMENT_NAMEから自動生成します。
 validations:
   - name: validation_synthetic
     input: data/validation_synthetic/test
-    run_dir: output/validation_synthetic_gate
     gt: data/validation_synthetic/gt
     eval_before: data/validation_synthetic/src
     overwrite: true
@@ -91,7 +87,6 @@ validations:
 
   - name: validation_skimage
     input: data/validation_skimage/test
-    run_dir: output/validation_skimage_gate
     gt: data/validation_skimage/gt
     eval_before: data/validation_skimage/src
     overwrite: true

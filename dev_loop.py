@@ -8,6 +8,7 @@ train評価とvalidation評価を履歴として保存します。best更新は�
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import os
@@ -20,6 +21,8 @@ from typing import Any
 
 import yaml
 
+from iir_filters import available_filter_names
+
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.yaml"
@@ -27,6 +30,51 @@ HISTORY_DIR = ROOT / "output" / "dev_history"
 BEST_ROOT = ROOT / "output" / "best_ai_filter"
 TMP_CONFIG_DIR = ROOT / "output" / "dev_tmp_configs"
 REQUIRED_VALIDATIONS = ("validation_synthetic", "validation_skimage")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run train and validation experiments using config.yaml as the base settings.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "filter_name",
+        choices=available_filter_names(),
+        help="Filter class name to test.",
+    )
+    parser.add_argument(
+        "experiment_name",
+        help="Name used to separate run_dir, validation run_dir, history, and best outputs.",
+    )
+    return parser
+
+
+def slugify(value: str) -> str:
+    slug = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in value.strip())
+    slug = slug.strip("._-")
+    if not slug:
+        raise RuntimeError("experiment name must contain at least one alphanumeric character")
+    return slug
+
+
+def prepare_config(base_config: dict[str, Any], filter_name: str, experiment_name: str) -> dict[str, Any]:
+    config = copy.deepcopy(base_config)
+    config["filter"] = {"name": filter_name}
+
+    experiment_id = slugify(experiment_name)
+    experiment_root = Path("output") / "experiments" / experiment_id
+    config["experiment_name"] = experiment_id
+    config["run_dir"] = str(experiment_root / "train")
+
+    validations = config.get("validations", []) or []
+    if not isinstance(validations, list):
+        raise RuntimeError("config value 'validations' must be a list")
+    for validation in validations:
+        if not isinstance(validation, dict):
+            raise RuntimeError("validation entries must be mappings")
+        name = str(validation.get("name", "validation"))
+        validation["run_dir"] = str(experiment_root / name)
+    return config
 
 
 def run_command(command: list[str], env: dict[str, str] | None = None) -> str:
@@ -73,6 +121,8 @@ def read_total_score(run_dir: Path) -> float:
 
 
 def best_dir_for_run(run_dir: Path) -> Path:
+    if run_dir.name == "train" and run_dir.parent.name:
+        return BEST_ROOT / run_dir.parent.name
     return BEST_ROOT / run_dir.name
 
 
@@ -109,8 +159,11 @@ def write_temp_config(name: str, config: dict[str, Any]) -> Path:
     return path
 
 
-def run_experiment_with_config(config_path: Path) -> str:
-    return run_command([sys.executable, "run_experiment.py"], {"RUN_EXPERIMENT_CONFIG": str(config_path)})
+def run_experiment_with_config(config_path: Path, filter_name: str, experiment_name: str) -> str:
+    return run_command(
+        [sys.executable, "run_experiment.py", filter_name, experiment_name],
+        {"RUN_EXPERIMENT_CONFIG": str(config_path)},
+    )
 
 
 def validation_config(base_config: dict[str, Any], validation: dict[str, Any]) -> dict[str, Any]:
@@ -131,7 +184,7 @@ def validation_config(base_config: dict[str, Any], validation: dict[str, Any]) -
     return merged
 
 
-def run_validations(base_config: dict[str, Any]) -> list[dict[str, Any]]:
+def run_validations(base_config: dict[str, Any], filter_name: str, experiment_name: str) -> list[dict[str, Any]]:
     validations = base_config.get("validations", []) or []
     if not isinstance(validations, list):
         raise RuntimeError("config value 'validations' must be a list")
@@ -144,7 +197,7 @@ def run_validations(base_config: dict[str, Any]) -> list[dict[str, Any]]:
         config = validation_config(base_config, validation)
         config_path = write_temp_config(name, config)
         print(f"running validation: {name}")
-        print(run_experiment_with_config(config_path))
+        print(run_experiment_with_config(config_path, filter_name, experiment_name))
 
         run_dir = path_from_value(config.get("run_dir"), f"validations[{index}].run_dir")
         score = read_total_score(run_dir)
@@ -227,12 +280,20 @@ def update_best_if_needed(run_dir: Path, score: float, validation_results: list[
 
 
 def main() -> int:
-    config = load_config()
-    print(run_command([sys.executable, "run_experiment.py"]))
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    try:
+        config = prepare_config(load_config(), args.filter_name, args.experiment_name)
+    except RuntimeError as exc:
+        parser.error(str(exc))
+
+    train_config_path = write_temp_config("train", config)
+    print(run_experiment_with_config(train_config_path, args.filter_name, args.experiment_name))
 
     run_dir = path_from_value(config.get("run_dir"), "run_dir")
     score = read_total_score(run_dir)
-    validation_results = run_validations(config)
+    validation_results = run_validations(config, args.filter_name, args.experiment_name)
     trial_dir = archive_trial(run_dir, score, validation_results)
     print(f"archived: {trial_dir}")
     update_best_if_needed(run_dir, score, validation_results)

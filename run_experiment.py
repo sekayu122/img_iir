@@ -58,6 +58,22 @@ def load_yaml_config(path: Path) -> dict[str, Any]:
     return raw
 
 
+def slugify(value: str) -> str:
+    slug = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in value.strip())
+    slug = slug.strip("._-")
+    if not slug:
+        raise RuntimeError("experiment name must contain at least one alphanumeric character")
+    return slug
+
+
+def prepare_config(base_config: dict[str, Any], filter_name: str, experiment_name: str) -> dict[str, Any]:
+    config = dict(base_config)
+    config["filter"] = {"name": filter_name}
+    config["experiment_name"] = slugify(experiment_name)
+    config.setdefault("run_dir", str(Path("output") / "experiments" / config["experiment_name"] / "train"))
+    return config
+
+
 def path_from_config(value: Any, repo_dir: Path, key: str) -> Path:
     if not isinstance(value, str) or not value:
         raise RuntimeError(f"config value '{key}' must be a non-empty path string")
@@ -132,20 +148,33 @@ def evaluation_options_from_config(config: dict[str, Any]) -> list[str]:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Apply a filter and evaluate it using config.yaml.",
+        description="Apply a filter and evaluate it using config.yaml as the base settings.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "filter_name",
+        choices=available_filter_names(),
+        help="Filter class name to test.",
+    )
+    parser.add_argument(
+        "experiment_name",
+        help="Name used to separate run_dir.",
     )
     return parser
 
 
 def main() -> int:
     parser = build_arg_parser()
-    parser.parse_args()
+    args = parser.parse_args()
     repo_dir = Path(__file__).resolve().parent
 
     try:
         config_path = CONFIG_PATH if CONFIG_PATH.is_absolute() else repo_dir / CONFIG_PATH
-        config = load_yaml_config(config_path)
+        config = prepare_config(
+            load_yaml_config(config_path),
+            args.filter_name,
+            args.experiment_name,
+        )
         input_dir = path_from_config(config.get("input"), repo_dir, "input")
         run_dir = path_from_config(config.get("run_dir"), repo_dir, "run_dir")
         gt_dir = path_from_config(config.get("gt"), repo_dir, "gt")

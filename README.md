@@ -18,20 +18,20 @@ pip install -r requirements.txt
 
 ## 基本ワークフロー
 
-実験条件は `config.yaml` に書き、通常は引数なしで実行します。
+データセットや評価条件は `config.yaml` に書き、フィルタ名と実験名は必須引数で指定します。
 
 ```bash
-python run_experiment.py
+python run_experiment.py AIExpFilter trial_001
 ```
 
 内部では次の順に実行します。
 
 ```text
-apply_filter.py input -> run_dir/filtered
-evaluate_img_quarity.py eval-before run_dir/filtered gt
+apply_filter.py input -> output/experiments/<experiment_name>/train/filtered
+evaluate_img_quarity.py eval-before output/experiments/<experiment_name>/train/filtered gt
 ```
 
-`config.yaml` の `eval_before` を空にした場合は、フィルタ入力と同じディレクトリがbeforeとして使われます。`run_experiment.py` の実験条件はすべて `config.yaml` に記述します。
+`config.yaml` の `eval_before` を空にした場合は、フィルタ入力と同じディレクトリがbeforeとして使われます。出力先とフィルタ名は、実行時の必須引数から決まります。
 
 ## 設定ファイル
 
@@ -39,13 +39,9 @@ evaluate_img_quarity.py eval-before run_dir/filtered gt
 
 ```yaml
 input: data/validation_synthetic/test
-run_dir: output/config_experiment
 gt: data/validation_synthetic/gt
 eval_before: data/validation_synthetic/src
 overwrite: true
-
-filter:
-  name: AIExpFilter
 
 evaluation:
   target_noise_db: 12.0
@@ -55,10 +51,8 @@ evaluation:
 ```
 
 - `input` - `apply_filter.py` に渡すフィルタ入力です。
-- `run_dir` - 実験結果の出力先です。
 - `gt` - GT画像ディレクトリです。
 - `eval_before` - 評価時のbeforeです。空の場合は `input` を使います。
-- `filter.name` - `iir_filters.py` の `FILTER_REGISTRY` に登録されたフィルタ名です。
 - `evaluation` - `evaluate_img_quarity.py` に渡す評価設定です。
 
 ## 主要スクリプト
@@ -74,10 +68,12 @@ evaluation:
 
 ## フィルタ開発
 
-`apply_filter.py` と `run_experiment.py` は、`iir_filters.py` の `FILTER_REGISTRY` に登録されたフィルタ名を使います。`run_experiment.py` では通常 `config.yaml` の `filter.name` で指定します。
+`apply_filter.py` と `run_experiment.py` は、`iir_filters.py` の `FILTER_REGISTRY` に登録されたフィルタ名を使います。`run_experiment.py` では必須引数でフィルタ名を指定します。
 
 ```bash
 python apply_filter.py input_tiffs output_tiffs --filter AIExpFilter
+python run_experiment.py AIExpFilter trial_001
+python dev_loop.py AIExpFilter trial_001
 ```
 
 現在の主なフィルタ:
