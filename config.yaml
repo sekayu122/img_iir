@@ -77,3 +77,22 @@ evaluation:
   #   - "10,20,160,120"
   #   - {x: 10, y: 20, width: 160, height: 120}
   dark_rois: []
+
+# best更新前に確認するvalidation設定。
+# dev_loop.pyはtrain評価後に以下をすべて実行し、すべてmin_total_score以上の場合だけbestを更新します。
+validations:
+  - name: validation_synthetic
+    input: data/validation_synthetic/test
+    run_dir: output/validation_synthetic_gate
+    gt: data/validation_synthetic/gt
+    eval_before: data/validation_synthetic/src
+    overwrite: true
+    min_total_score: 70.0
+
+  - name: validation_skimage
+    input: data/validation_skimage/test
+    run_dir: output/validation_skimage_gate
+    gt: data/validation_skimage/gt
+    eval_before: data/validation_skimage/src
+    overwrite: true
+    min_total_score: 70.0

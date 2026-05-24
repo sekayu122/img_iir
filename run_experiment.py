@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,7 @@ import yaml
 from iir_filters import available_filter_names
 
 
-CONFIG_PATH = Path("config.yaml")
+CONFIG_PATH = Path(os.environ.get("RUN_EXPERIMENT_CONFIG", "config.yaml"))
 
 
 def run_command(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -143,7 +144,8 @@ def main() -> int:
     repo_dir = Path(__file__).resolve().parent
 
     try:
-        config = load_yaml_config(repo_dir / CONFIG_PATH)
+        config_path = CONFIG_PATH if CONFIG_PATH.is_absolute() else repo_dir / CONFIG_PATH
+        config = load_yaml_config(config_path)
         input_dir = path_from_config(config.get("input"), repo_dir, "input")
         run_dir = path_from_config(config.get("run_dir"), repo_dir, "run_dir")
         gt_dir = path_from_config(config.get("gt"), repo_dir, "gt")
