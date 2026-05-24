@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from iir_filters import create_filter
+from iir_filters import available_filter_names, create_filter
 
 
 IMAGE_SUFFIXES = {".tif", ".tiff"}
@@ -104,7 +104,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("output", type=Path, help="new output TIFF image directory")
     parser.add_argument(
         "--filter",
-        choices=("alpha",),
+        choices=available_filter_names(),
         default="alpha",
         help="filter algorithm",
     )
