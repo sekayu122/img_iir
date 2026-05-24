@@ -18,6 +18,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+from skimage.metrics import structural_similarity
 
 
 IMAGE_SUFFIXES = {".tif", ".tiff"}
@@ -53,15 +54,25 @@ DEFAULT_SCORE_WEIGHTS = {
     "dark_noise": 1.0,
     "dark_blur": 1.0,
     "dark_motion": 1.0,
+    "dark_psnr": 1.0,
+    "dark_ssim": 1.0,
     "normal_noise": 1.0,
     "normal_blur": 1.0,
     "normal_motion": 1.0,
+    "normal_psnr": 1.0,
+    "normal_ssim": 1.0,
     "high_noise": 1.0,
     "high_blur": 1.0,
     "high_motion": 1.0,
+    "high_psnr": 1.0,
+    "high_ssim": 1.0,
 }
 
 DEFAULT_NOISE_FLOOR = 0.002
+DEFAULT_PSNR_MIN_DB = 25.0
+DEFAULT_PSNR_TARGET_DB = 40.0
+DEFAULT_SSIM_MIN = 0.75
+DEFAULT_SSIM_TARGET = 0.95
 
 
 def list_image_files(input_dir: Path) -> list[Path]:
@@ -172,6 +183,39 @@ def safe_mean(values: list[float]) -> float:
     return float(np.mean(finite)) if finite else float("nan")
 
 
+def psnr_from_mse(mse: float) -> float:
+    """0..1正規化画像のMSEからPSNR[dB]を返す。"""
+    if not np.isfinite(mse) or mse < 0.0:
+        return float("nan")
+    if mse == 0.0:
+        return 100.0
+    return float(10.0 * math.log10(1.0 / mse))
+
+
+def psnr_luma(after_luma: np.ndarray, gt_luma: np.ndarray, mask: np.ndarray | None = None) -> float:
+    """GT基準の輝度PSNR[dB]を返す。"""
+    diff = after_luma - gt_luma
+    if mask is not None:
+        if not np.any(mask):
+            return float("nan")
+        diff = diff[mask]
+    return psnr_from_mse(float(np.mean(diff * diff)))
+
+
+def ssim_luma_map(after_luma: np.ndarray, gt_luma: np.ndarray) -> tuple[float, np.ndarray]:
+    """GT基準の輝度SSIMとSSIM mapを返す。"""
+    score, score_map = structural_similarity(
+        gt_luma,
+        after_luma,
+        data_range=1.0,
+        gaussian_weights=True,
+        sigma=1.5,
+        use_sample_covariance=False,
+        full=True,
+    )
+    return float(score), score_map.astype(np.float32)
+
+
 def score_noise_reduction(
     before_noise: float,
     after_noise: float,
@@ -209,6 +253,13 @@ def score_lower_is_better(value: float, reference: float) -> float:
     return float(np.clip(100.0 * (1.0 - value / reference), 0.0, 100.0))
 
 
+def score_higher_is_better(value: float, minimum: float, target: float) -> float:
+    """大きいほど良い値を0..100点へ変換する。"""
+    if not np.isfinite(value) or target <= minimum:
+        return float("nan")
+    return float(np.clip(100.0 * (value - minimum) / (target - minimum), 0.0, 100.0))
+
+
 def validate_triplet(
     before: np.ndarray,
     after: np.ndarray,
@@ -235,7 +286,7 @@ def weighted_total(bands: dict[str, dict[str, Any]], weights: dict[str, float]) 
     weighted_sum = 0.0
     total_weight = 0.0
     for band_name, metrics in bands.items():
-        for metric_name in ("noise", "blur", "motion"):
+        for metric_name in ("noise", "blur", "motion", "psnr", "ssim"):
             score = metrics[f"{metric_name}_score"]
             weight = weights[f"{band_name}_{metric_name}"]
             if weight > 0.0 and np.isfinite(score):
@@ -253,6 +304,10 @@ def evaluate_sequences(
     motion_error_ref: float,
     motion_threshold: float,
     noise_floor: float,
+    psnr_min_db: float,
+    psnr_target_db: float,
+    ssim_min: float,
+    ssim_target: float,
     min_pixels: int,
     weights: dict[str, float],
     dark_rois: list[Roi],
@@ -269,12 +324,16 @@ def evaluate_sequences(
             "gt_edge": [],
             "after_edge": [],
             "motion_error": [],
+            "psnr_db": [],
+            "ssim": [],
             "noise_pixels": [],
             "edge_pixels": [],
             "motion_pixels": [],
         }
         for band in BANDS
     }
+    overall_psnr_db: list[float] = []
+    overall_ssim: list[float] = []
 
     first_before = read_image(before_files[0])
     first_after = read_image(after_files[0])
@@ -302,6 +361,10 @@ def evaluate_sequences(
         band_luma = np.maximum(gt_luma, prev_gt_luma)
         before_residual = before_luma - gt_luma
         after_residual = after_luma - gt_luma
+        frame_psnr = psnr_luma(after_luma, gt_luma)
+        frame_ssim, frame_ssim_map = ssim_luma_map(after_luma, gt_luma)
+        overall_psnr_db.append(frame_psnr)
+        overall_ssim.append(frame_ssim)
 
         for band in BANDS:
             band_mask = make_band_mask(gt_luma, band)
@@ -320,6 +383,10 @@ def evaluate_sequences(
                 accum[band.name]["gt_edge"].append(gt_edge)
                 accum[band.name]["after_edge"].append(after_edge)
                 accum[band.name]["edge_pixels"].append(edge_pixels)
+
+            if int(np.count_nonzero(band_mask)) >= min_pixels:
+                accum[band.name]["psnr_db"].append(psnr_luma(after_luma, gt_luma, band_mask))
+                accum[band.name]["ssim"].append(float(np.mean(frame_ssim_map[band_mask])))
 
             motion_band_mask = motion_mask & make_band_mask(band_luma, band)
             if int(np.count_nonzero(motion_band_mask)) >= min_pixels:
@@ -347,6 +414,10 @@ def evaluate_sequences(
 
         motion_error = safe_mean(values["motion_error"])  # type: ignore[arg-type]
         motion_score = score_lower_is_better(motion_error, motion_error_ref)
+        psnr_db = safe_mean(values["psnr_db"])  # type: ignore[arg-type]
+        ssim = safe_mean(values["ssim"])  # type: ignore[arg-type]
+        psnr_score = score_higher_is_better(psnr_db, psnr_min_db, psnr_target_db)
+        ssim_score = score_higher_is_better(ssim, ssim_min, ssim_target)
 
         bands[band.name] = {
             "before_noise": before_noise,
@@ -359,6 +430,10 @@ def evaluate_sequences(
             "blur_score": blur_score,
             "motion_error": motion_error,
             "motion_score": motion_score,
+            "psnr_db": psnr_db,
+            "psnr_score": psnr_score,
+            "ssim": ssim,
+            "ssim_score": ssim_score,
             "noise_pixels_mean": safe_mean(values["noise_pixels"]),  # type: ignore[arg-type]
             "edge_pixels_mean": safe_mean(values["edge_pixels"]),  # type: ignore[arg-type]
             "motion_pixels_mean": safe_mean(values["motion_pixels"]),  # type: ignore[arg-type]
@@ -376,12 +451,20 @@ def evaluate_sequences(
         "motion_error_ref": motion_error_ref,
         "motion_threshold": motion_threshold,
         "noise_floor": noise_floor,
+        "psnr_min_db": psnr_min_db,
+        "psnr_target_db": psnr_target_db,
+        "ssim_min": ssim_min,
+        "ssim_target": ssim_target,
         "dark_rois": [
             {"x": roi.x, "y": roi.y, "width": roi.width, "height": roi.height}
             for roi in dark_rois
         ],
         "score_weights": weights,
         "bands": bands,
+        "image_quality": {
+            "psnr_db": safe_mean(overall_psnr_db),
+            "ssim": safe_mean(overall_ssim),
+        },
         "total_score": weighted_total(bands, weights),
     }
 
@@ -440,7 +523,7 @@ def print_text_result(result: dict[str, Any]) -> None:
         "band,"
         "noise_score,noise_reduction_db,before_noise,after_noise,"
         "blur_score,edge_ratio,gt_edge,after_edge,"
-        "motion_score,motion_error"
+        "motion_score,motion_error,psnr_score,psnr_db,ssim_score,ssim"
     )
     for band_name, metrics in result["bands"].items():
         print(
@@ -454,9 +537,17 @@ def print_text_result(result: dict[str, Any]) -> None:
             f"{metrics['gt_edge_strength']:.6f},"
             f"{metrics['after_edge_strength']:.6f},"
             f"{metrics['motion_score']:.2f},"
-            f"{metrics['motion_error']:.6f}"
+            f"{metrics['motion_error']:.6f},"
+            f"{metrics['psnr_score']:.2f},"
+            f"{metrics['psnr_db']:.3f},"
+            f"{metrics['ssim_score']:.2f},"
+            f"{metrics['ssim']:.6f}"
         )
     print()
+    print(
+        f"overall_psnr_db: {result['image_quality']['psnr_db']:.3f}, "
+        f"overall_ssim: {result['image_quality']['ssim']:.6f}"
+    )
     print(f"total_score: {result['total_score']:.2f}")
 
 
@@ -497,6 +588,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_NOISE_FLOOR,
         help="normalized temporal noise treated as already clean",
+    )
+    parser.add_argument(
+        "--psnr-min-db",
+        type=float,
+        default=DEFAULT_PSNR_MIN_DB,
+        help="PSNR dB that maps to 0 PSNR points",
+    )
+    parser.add_argument(
+        "--psnr-target-db",
+        type=float,
+        default=DEFAULT_PSNR_TARGET_DB,
+        help="PSNR dB that maps to 100 PSNR points",
+    )
+    parser.add_argument(
+        "--ssim-min",
+        type=float,
+        default=DEFAULT_SSIM_MIN,
+        help="SSIM that maps to 0 SSIM points",
+    )
+    parser.add_argument(
+        "--ssim-target",
+        type=float,
+        default=DEFAULT_SSIM_TARGET,
+        help="SSIM that maps to 100 SSIM points",
     )
     parser.add_argument(
         "--min-pixels",
@@ -545,6 +660,10 @@ def main() -> int:
         parser.error("motion-threshold must be positive")
     if args.noise_floor < 0:
         parser.error("noise-floor must be >= 0")
+    if args.psnr_target_db <= args.psnr_min_db:
+        parser.error("psnr-target-db must be greater than psnr-min-db")
+    if not 0.0 <= args.ssim_min < args.ssim_target <= 1.0:
+        parser.error("ssim-min and ssim-target must satisfy 0.0 <= min < target <= 1.0")
     if args.min_pixels <= 0:
         parser.error("min-pixels must be positive")
 
@@ -572,6 +691,10 @@ def main() -> int:
             args.motion_error_ref,
             args.motion_threshold,
             args.noise_floor,
+            args.psnr_min_db,
+            args.psnr_target_db,
+            args.ssim_min,
+            args.ssim_target,
             args.min_pixels,
             weights,
             args.dark_roi,

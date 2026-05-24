@@ -3,3 +3,4 @@ imageio
 imageio-ffmpeg
 opencv-python
 gdown
+scikit-image
