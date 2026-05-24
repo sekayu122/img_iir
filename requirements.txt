@@ -4,3 +4,4 @@ imageio-ffmpeg
 opencv-python
 gdown
 scikit-image
+PyYAML

@@ -66,10 +66,9 @@ def apply_filter_to_sequence(
     input_files: list[Path],
     output_dir: Path,
     filter_name: str,
-    alpha: float,
 ) -> int:
     """連番画像にフィルタを適用して出力フォルダへ保存する。"""
-    frame_filter = create_filter(filter_name, alpha)
+    frame_filter = create_filter(filter_name)
     output_dir.mkdir(parents=True, exist_ok=False)
 
     output_count = 0
@@ -108,12 +107,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="alpha",
         help="filter algorithm",
     )
-    parser.add_argument(
-        "--alpha",
-        type=float,
-        default=0.5,
-        help="current-frame blend amount; output[n]=alpha*input[n]+(1-alpha)*output[n-1]",
-    )
     return parser
 
 
@@ -130,16 +123,12 @@ def main() -> int:
         parser.error(f"input must be a directory: {args.input}")
     if args.output.exists():
         parser.error(f"output directory already exists: {args.output}")
-    if not 0.0 <= args.alpha <= 1.0:
-        parser.error("alpha must be 0.0..1.0")
-
     try:
         input_files = list_image_files(args.input)
         output_count = apply_filter_to_sequence(
             input_files,
             args.output,
             args.filter,
-            args.alpha,
         )
     except (RuntimeError, ValueError) as exc:
         parser.error(str(exc))
@@ -147,7 +136,7 @@ def main() -> int:
     print(
         f"wrote {args.output} "
         f"(input={args.input}, frames={output_count}, "
-        f"filter={args.filter}, alpha={args.alpha})"
+        f"filter={args.filter})"
     )
     return 0
 

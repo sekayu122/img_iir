@@ -1,0 +1,66 @@
+# run_experiment.py default settings.
+# Run with: python run_experiment.py
+input: data/validation_synthetic/test
+run_dir: output/config_experiment
+gt: data/validation_synthetic/gt
+eval_before: data/validation_synthetic/src
+overwrite: true
+
+filter:
+  name: AIExpFilter
+
+# evaluate_img_quarity.py に渡す評価設定。
+evaluation:
+  # ノイズ低減スコアの100点に相当する低減量[dB]。
+  # 小さくすると少しのノイズ低減でも高得点になり、大きくするとより強い低減が必要になります。
+  target_noise_db: 12.0
+
+  # ブラー評価の0点に相当する after/GT エッジ強度比。
+  # 例: 0.6なら、GTの60%までエッジが弱くなるとblur_scoreが0点になります。
+  blur_min_ratio: 0.6
+
+  # モーション誤差の0点に相当する正規化誤差。
+  # 小さくすると残像や動体ズレに厳しく、大きくすると緩くなります。
+  motion_error_ref: 0.08
+
+  # GTフレーム差分から動体領域を検出する閾値。
+  # 小さくすると動体判定が増え、大きくすると大きく動いた領域だけを動体として扱います。
+  motion_threshold: 0.05
+
+  # これ以下の正規化ノイズ量は、すでに十分クリーンとして扱います。
+  # ノイズが非常に少ない入力でNaNや過剰評価を避けるための下限です。
+  noise_floor: 0.002
+
+  # PSNRスコアの0点に相当するPSNR[dB]。
+  psnr_min_db: 25.0
+
+  # PSNRスコアの100点に相当するPSNR[dB]。
+  # 高くすると、GTにより近い画素値でないと高得点になりません。
+  psnr_target_db: 40.0
+
+  # SSIMスコアの0点に相当するSSIM値。
+  ssim_min: 0.75
+
+  # SSIMスコアの100点に相当するSSIM値。
+  # 高くすると、GTにより近い構造を保たないと高得点になりません。
+  ssim_target: 0.95
+
+  # 各輝度帯/指標を計算するために必要な最小画素数。
+  # 小さすぎる領域の統計値を評価に使わないための設定です。
+  min_pixels: 100
+
+  # total_scoreの重み設定。
+  # 未指定の項目はデフォルト重み1.0です。
+  # 例:
+  #   dark_noise: 3.0   # 暗部ノイズ低減を重視
+  #   dark_motion: 2.0  # 暗部の残像抑制も重視
+  #   high_psnr: 0.0    # 高輝度PSNRをtotal_scoreから除外
+  weights: {}
+
+  # 暗部ノイズ評価に使う静止ROI。
+  # 空の場合は輝度から自動でdark領域を選びます。
+  # 形式は "x,y,width,height"、または下のようなmap形式です。
+  # 例:
+  #   - "10,20,160,120"
+  #   - {x: 10, y: 20, width: 160, height: 120}
+  dark_rois: []

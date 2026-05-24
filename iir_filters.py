@@ -25,10 +25,10 @@ class FrameFilter(ABC):
 class AlphaBlendIirFilter(FrameFilter):
     """現在フレームと前回出力をアルファブレンディングする1次IIR。"""
 
-    def __init__(self, alpha: float = 0.5) -> None:
-        if not 0.0 <= alpha <= 1.0:
-            raise ValueError("alpha must be 0.0..1.0")
-        self.alpha = float(alpha)
+    DEFAULT_ALPHA = 0.5
+
+    def __init__(self) -> None:
+        self.alpha = float(self.DEFAULT_ALPHA)
         self._previous_output: np.ndarray | None = None
 
     def reset(self) -> None:
@@ -150,14 +150,14 @@ def _odd_kernel_size(value: int) -> int:
     return kernel if kernel % 2 == 1 else kernel + 1
 
 
-FilterFactory = Callable[[float], FrameFilter]
+FilterFactory = Callable[[], FrameFilter]
 
 
-def _create_alpha(alpha: float) -> FrameFilter:
-    return AlphaBlendIirFilter(alpha)
+def _create_alpha() -> FrameFilter:
+    return AlphaBlendIirFilter()
 
 
-def _create_ai_exp(_: float) -> FrameFilter:
+def _create_ai_exp() -> FrameFilter:
     return AIExpFilter()
 
 
@@ -172,11 +172,11 @@ def available_filter_names() -> tuple[str, ...]:
     return tuple(FILTER_REGISTRY)
 
 
-def create_filter(name: str, alpha: float = 0.5) -> FrameFilter:
+def create_filter(name: str) -> FrameFilter:
     """名前からフィルタインスタンスを作る。"""
     try:
         factory = FILTER_REGISTRY[name]
     except KeyError as exc:
         choices = ", ".join(available_filter_names())
         raise ValueError(f"unknown filter: {name}; choices: {choices}") from exc
-    return factory(alpha)
+    return factory()

@@ -18,14 +18,10 @@ pip install -r requirements.txt
 
 ## 基本ワークフロー
 
+実験条件は `config.yaml` に書き、通常は引数なしで実行します。
+
 ```bash
-python run_experiment.py \
-  data/validation_synthetic/test \
-  output/validation_synthetic_ai \
-  data/validation_synthetic/gt \
-  --eval-before data/validation_synthetic/src \
-  --filter AIExpFilter \
-  --overwrite
+python run_experiment.py
 ```
 
 内部では次の順に実行します。
@@ -35,7 +31,35 @@ apply_filter.py input -> run_dir/filtered
 evaluate_img_quarity.py eval-before run_dir/filtered gt
 ```
 
-`--eval-before` を省略した場合は、フィルタ入力と同じディレクトリがbeforeとして使われます。
+`config.yaml` の `eval_before` を空にした場合は、フィルタ入力と同じディレクトリがbeforeとして使われます。`run_experiment.py` の実験条件はすべて `config.yaml` に記述します。
+
+## 設定ファイル
+
+`config.yaml` の主な項目:
+
+```yaml
+input: data/validation_synthetic/test
+run_dir: output/config_experiment
+gt: data/validation_synthetic/gt
+eval_before: data/validation_synthetic/src
+overwrite: true
+
+filter:
+  name: AIExpFilter
+
+evaluation:
+  target_noise_db: 12.0
+  psnr_target_db: 40.0
+  weights: {}
+  dark_rois: []
+```
+
+- `input` - `apply_filter.py` に渡すフィルタ入力です。
+- `run_dir` - 実験結果の出力先です。
+- `gt` - GT画像ディレクトリです。
+- `eval_before` - 評価時のbeforeです。空の場合は `input` を使います。
+- `filter.name` - `iir_filters.py` の `FILTER_REGISTRY` に登録されたフィルタ名です。
+- `evaluation` - `evaluate_img_quarity.py` に渡す評価設定です。
 
 ## 主要スクリプト
 
@@ -50,7 +74,7 @@ evaluate_img_quarity.py eval-before run_dir/filtered gt
 
 ## フィルタ開発
 
-`apply_filter.py` と `run_experiment.py` は、`iir_filters.py` の `FILTER_REGISTRY` に登録されたフィルタ名を `--filter` で指定します。
+`apply_filter.py` と `run_experiment.py` は、`iir_filters.py` の `FILTER_REGISTRY` に登録されたフィルタ名を使います。`run_experiment.py` では通常 `config.yaml` の `filter.name` で指定します。
 
 ```bash
 python apply_filter.py input_tiffs output_tiffs --filter AIExpFilter
@@ -58,7 +82,7 @@ python apply_filter.py input_tiffs output_tiffs --filter AIExpFilter
 
 現在の主なフィルタ:
 
-- `alpha` - 固定alphaの1次IIR。`--alpha` で係数を指定できます。
+- `alpha` - 固定alphaの1次IIR。係数は `iir_filters.py` の `AlphaBlendIirFilter.DEFAULT_ALPHA` で管理します。
 - `AIExpFilter` - AI開発用の実験フィルタ。
 
 新しいアルゴリズムを追加する場合は、`iir_filters.py` に `AIExpFilterV2` のようなclassを追加し、`FILTER_REGISTRY` に登録します。これにより `apply_filter.py` や `run_experiment.py` を変更せずに呼び出せます。
