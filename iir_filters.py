@@ -49,10 +49,10 @@ class AIExpFilterConfig:
     """AI開発用フィルタの内蔵設定。探索時はこのファイル内で変更する。"""
 
     edge_alpha: float = 0.95
-    static_alpha: float = 0.25
-    motion_alpha: float = 0.92
-    dark_boost: float = 0.18
-    motion_threshold: float = 0.03
+    static_alpha: float = 0.18
+    motion_alpha: float = 1.0
+    dark_boost: float = 0.0
+    motion_threshold: float = 0.08
     edge_threshold: float = 0.08
     dark_luma_limit: float = 0.35
     motion_blur_kernel: int = 5
