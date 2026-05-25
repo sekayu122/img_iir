@@ -136,6 +136,20 @@ class SimpleSceneMixedMedianFilter(FrameFilter):
         return np.where(dark_mask, median_dark, median_other).astype(np.float32)
 
 
+class NormalVideoDarkDenoiseFilter(FrameFilter):
+    """通常映像向け: 適応IIRの後段で暗部の非エッジ領域だけ中央値デノイズする。"""
+
+    def __init__(self) -> None:
+        self._iir_filter = AIExpFilter()
+
+    def reset(self) -> None:
+        self._iir_filter.reset()
+
+    def apply(self, frame: np.ndarray) -> np.ndarray:
+        iir_output = self._iir_filter.apply(frame)
+        return _dark_edge_protected_median_postprocess(iir_output, frame.dtype)
+
+
 @dataclass(frozen=True)
 class HybridDarkSceneFilterConfig:
     """暗部が大半の単純テストでは空間中央値、自然画像では既存IIRを使う設定。"""
@@ -220,12 +234,17 @@ def _create_alpha() -> FrameFilter:
 
 
 def _create_ai_exp() -> FrameFilter:
-    return HybridDarkSceneFilter()
+    return NormalVideoDarkDenoiseFilter()
+
+
+def _create_normal_video_dark() -> FrameFilter:
+    return NormalVideoDarkDenoiseFilter()
 
 
 FILTER_REGISTRY: dict[str, FilterFactory] = {
     "alpha": _create_alpha,
     "AIExpFilter": _create_ai_exp,
+    "NormalVideoDarkDenoiseFilter": _create_normal_video_dark,
 }
 
 
