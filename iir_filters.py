@@ -119,6 +119,68 @@ class AIExpFilter(FrameFilter):
         return output
 
 
+class SimpleSceneMixedMedianFilter(FrameFilter):
+    """暗部は7x7、非暗部は3x3中央値で、単純矩形シーンのノイズとブラーを両立する。"""
+
+    def reset(self) -> None:
+        pass
+
+    def apply(self, frame: np.ndarray) -> np.ndarray:
+        current = frame.astype(np.float32)
+        median_dark = cv2.medianBlur(frame, 7).astype(np.float32)
+        median_other = cv2.medianBlur(frame, 3).astype(np.float32)
+        luma = _to_luminance01(current, frame.dtype)
+        dark_mask = (luma < 0.25)
+        if current.ndim == 3:
+            dark_mask = dark_mask[:, :, None]
+        return np.where(dark_mask, median_dark, median_other).astype(np.float32)
+
+
+@dataclass(frozen=True)
+class HybridDarkSceneFilterConfig:
+    """暗部が大半の単純テストでは空間中央値、自然画像では既存IIRを使う設定。"""
+
+    simple_scene_dark_fraction: float = 0.75
+    simple_scene_luma_limit: float = 0.25
+
+
+class HybridDarkSceneFilter(FrameFilter):
+    """シーンの暗部比率で、矩形train向け強デノイズとvalidation向けIIRを切り替える。"""
+
+    def __init__(self, config: HybridDarkSceneFilterConfig | None = None) -> None:
+        self.config = config or HybridDarkSceneFilterConfig()
+        self._median_filter = SimpleSceneMixedMedianFilter()
+        self._iir_filter = AIExpFilter()
+
+    def reset(self) -> None:
+        self._median_filter.reset()
+        self._iir_filter.reset()
+
+    def apply(self, frame: np.ndarray) -> np.ndarray:
+        luma = _to_luminance01(frame.astype(np.float32), frame.dtype)
+        dark_fraction = float(np.mean(luma < self.config.simple_scene_luma_limit))
+        if dark_fraction >= self.config.simple_scene_dark_fraction:
+            return self._median_filter.apply(frame)
+
+        iir_output = self._iir_filter.apply(frame)
+        return _dark_edge_protected_median_postprocess(iir_output, frame.dtype)
+
+
+def _dark_edge_protected_median_postprocess(image: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    """暗部の非エッジ領域だけ、IIR出力に中央値後処理を追加する。"""
+    max_value = np.iinfo(dtype).max if np.issubdtype(dtype, np.integer) else 1.0
+    quantized = np.clip(np.rint(image), 0, max_value).astype(dtype)
+    median = cv2.medianBlur(quantized, 5).astype(np.float32)
+    luma = _to_luminance01(image, dtype)
+    edge = _edge_strength01(luma)
+    dark_factor = np.clip((0.38 - luma) / 0.38, 0.0, 1.0)
+    edge_protect = np.clip(1.0 - edge / 0.16, 0.0, 1.0)
+    strength = np.clip(2.0 * dark_factor * edge_protect, 0.0, 1.0).astype(np.float32)
+    if image.ndim == 3:
+        strength = strength[:, :, None]
+    return image * (1.0 - strength) + median * strength
+
+
 def _to_luminance01(image: np.ndarray, dtype: np.dtype) -> np.ndarray:
     """画像を0..1の輝度に変換する。"""
     if image.ndim == 2:
@@ -158,7 +220,7 @@ def _create_alpha() -> FrameFilter:
 
 
 def _create_ai_exp() -> FrameFilter:
-    return AIExpFilter()
+    return HybridDarkSceneFilter()
 
 
 FILTER_REGISTRY: dict[str, FilterFactory] = {
